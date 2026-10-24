@@ -5,14 +5,14 @@
 ![RTX Optimized](https://img.shields.io/badge/RTX-Optimized-76b900)
 ![ComfyUI Backend](https://img.shields.io/badge/Backend-ComfyUI-333333)
 
-A clean, chat-inspired web interface for creating and editing images on your Windows PC.
-Atelier Images hides ComfyUI's node graphs behind a prompt box, a model selector and a gallery.
-After setup, one double-click starts the local services and opens your browser.
+A local image generator and editor for **Windows**, built with **Python and ComfyUI**.
+The chat-inspired interface lets you write a prompt, choose a model and generate an image without
+editing node graphs. After setup, double-click the launcher to start the app.
 
 The interface currently uses French labels. This repository contains Atelier's source code;
 ComfyUI, Python, model weights and generated images are installed separately.
 
-## Features
+## 🎨 Features
 
 - Text-to-image with FLUX.1 [schnell] GGUF Q4_K_S.
 - Text-to-image and single-reference image editing with Qwen Image 2.1 Uncensored.
@@ -22,7 +22,14 @@ ComfyUI, Python, model weights and generated images are installed separately.
   and reuses running services.
 - Local GPU inference, with CPU text-encoder offloading for limited VRAM.
 
-## Requirements
+## 🛠️ Built With
+
+- **Python** — local web server, workflows and model setup scripts.
+- **HTML, CSS and JavaScript** — prompt interface and image gallery.
+- **ComfyUI + ComfyUI-GGUF** — local inference with FLUX and Qwen.
+- **C# and PowerShell** — Windows launcher and background startup.
+
+## 💻 Requirements
 
 - Windows with a working NVIDIA ComfyUI portable installation and compatible GPU drivers/PyTorch.
 - A ComfyUI build supporting Qwen Image 2.1 nodes when using Qwen, plus
@@ -32,7 +39,7 @@ ComfyUI, Python, model weights and generated images are installed separately.
 - Roughly 21 GiB for the listed weights, plus space for ComfyUI, Python, downloads and outputs.
 - Windows PowerShell and the .NET Framework C# compiler for building the launcher.
 
-## Quick start
+## ▶️ How to Run
 
 ### 1. Place the source in your portable installation
 
@@ -109,7 +116,7 @@ With Qwen, add a PNG, JPEG or WebP reference to edit an existing image. Remove t
 to text-to-image. Reference uploads are limited to 20 MB / 25 megapixels and normalized locally.
 Closing the browser leaves the local servers running for the next session.
 
-## Privacy and local storage
+## 🔒 Privacy and Local Storage
 
 Atelier's generation/editing requests go to the local ComfyUI server. Its frontend has no analytics,
 remote fonts or CDN dependencies. Servers bind to loopback: Atelier on `127.0.0.1:8189`,
@@ -130,7 +137,23 @@ Sharing an original PNG can also share its prompt/workflow. Files are not encryp
 Removing a reference from the form does not delete its saved copy. The gallery displays the latest
 150 matching outputs without deleting older files. Private runtime files are excluded by `.gitignore`.
 
-## Development
+## 📁 Project Structure
+
+```text
+atelier_images/
+  dist/           # HTML, CSS and JavaScript interface
+  integration/    # Custom ComfyUI reference-image node
+  launcher/       # C# executable source
+  workflows/      # FLUX workflow template
+  server.py       # Local web server
+  models.py       # Supported model configuration
+  qwen_workflow.py
+start.ps1         # Background startup and readiness checks
+build_launcher.ps1
+prepare_atelier.py
+```
+
+## 🧪 Development
 
 The frontend is maintained directly in `atelier_images/dist/` (HTML, CSS and JavaScript), with no
 Node build step. `atelier_images/server.py` serves the frontend and constructs local ComfyUI requests.
@@ -147,13 +170,13 @@ Run the workflow tests from the portable root:
 For launch failures, inspect `atelier_images/launcher.log`, `launcher-server.stderr.log` and
 `comfyui.log`. Avoid attaching private prompts, output PNGs or logs to public issues without reviewing them.
 
-## License
+## 📄 License
 
 Atelier's original source is released under the [MIT License](LICENSE). ComfyUI, ComfyUI-GGUF,
 Python, dependencies and model weights retain their own licenses and are not redistributed here.
 Check the relevant model repository terms before use or redistribution.
 
-## Credits / Acknowledgments
+## 👥 Credits / Acknowledgments
 
 Thanks to the ComfyUI community, city96 and the creators and maintainers of FLUX, Qwen and their
 quantized model releases. Built with the assistance of AI coding tools.
