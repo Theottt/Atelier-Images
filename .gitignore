@@ -1,0 +1,88 @@
+# Generated launcher and compilation artifacts (keep launcher source and scripts).
+/Atelier Images.exe
+/build/
+/dist/
+*.spec
+*.pdb
+*.obj
+
+# Python runtime caches and local diagnostic logs.
+__pycache__/
+*.py[cod]
+*.log
+
+# Upstream runtime, tools and bundled launchers (not Atelier source).
+/ComfyUI/
+/python_embeded/
+/advanced/
+/update/
+/.tools/
+/README_VERY_IMPORTANT.txt
+/run_*.bat
+
+# Model weights, downloads and binary dependencies.
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.part
+*.zip
+*.7z
+*.exe
+*.dll
+*.msi
+
+# Private media, browser profiles and runtime state.
+/ComfyUI/output/
+/ComfyUI/input/
+/ComfyUI/temp/
+/atelier_images/browser-*/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+active_job.json
+active_job.tmp
+/flux_test_job.json
+/test_flux_image.py
+/atelier_images/qwen_verified.json
+/atelier_images/qwen_*_source.json
+/atelier_images/browser_qa.mjs
+*.db
+*.db-*
+*.sqlite*
+*.lock
+*.bak
+*.tmp
+
+# Environments and caches; atelier_images/dist is maintained frontend source.
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+*.egg-info/
+node_modules/
+
+# Credentials and local editor/agent settings.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+.aws/
+.ssh/
+.codex/
+.agents/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
