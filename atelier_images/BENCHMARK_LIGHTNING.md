@@ -29,3 +29,8 @@ Atelier appelle `/free` de ComfyUI quand la famille de modèle change.
 |---|---:|---:|---:|
 | FLUX Schnell, T5 sur GPU | 64 s | 36 s | **11-17 s** (contre 82 s avant) |
 | Qwen Lightning 4 étapes | 38-54 s | 20-41 s | **15-20 s** (contre 101 s avant, 28 étapes) |
+
+## Cohérence avec fiche @Nom (image de référence)
+Bean Blob dans 3 scènes (prairie qui court, dort sur un coussin, mange un cookie), Qwen Lightning + image de fiche :
+même personnage sur les 3 images (forme, rose, yeux, sourire, pousse à 2 feuilles, pieds) et décor respecté.
+Limite : la pose de la référence domine (il ne court pas, il ne dort pas les yeux fermés) ; le cookie est bien tenu.
