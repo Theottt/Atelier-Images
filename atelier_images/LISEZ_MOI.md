@@ -132,7 +132,7 @@ FLUX Schnell conserve ses 4 étapes et ses encodeurs CLIP-L/T5. Le profil Dev ut
 **Qwen 2.1 Lightning · 4 étapes** (premier choix de **Mon modèle**) = les poids Qwen 2.1 déjà installés + le LoRA
 LightX2V Lightning v2-RL (`ComfyUI/models/loras/qwen21_lightning_v2_rl_4steps_rank64.safetensors`, SHA-256
 `02363ec9…3b09c6d`), avec le calendrier de 4 sigmas publié par ses auteurs. Il garde la compréhension fine de Qwen
-pour une fraction du temps. Les mesures avant / après sont dans `BENCHMARK_LIGHTNING.md` (`bench.py` les refait).
+pour une fraction du temps. Les mesures avant / après sont dans `BENCHMARK_LIGHTNING.md` (`bench.py` les refait). Les modèles restent chargés entre deux images (plus de `--cache-none`) ; la mémoire est vidée quand tu changes de famille de modèle. Les 1 à 2 premières images après un démarrage ou un changement de modèle restent lentes (chargement).
 
 **Fiches** : `atelier_images/characters/characters.json` (exemple : `characters.example.json`, dossier ignoré par Git).
 Écris `@Nom` dans une idée : la description exacte de la fiche est insérée à chaque fois. Si la fiche a une image

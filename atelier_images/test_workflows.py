@@ -17,7 +17,7 @@ from qwen_workflow import make_qwen_prompt, MODEL
 
 class WorkflowTests(unittest.TestCase):
     def test_memory_profile_rejects_forced_cpu_encoder(self):
-        flags = ['--disable-dynamic-vram', '--reserve-vram', '1', '--cache-none']
+        flags = ['--disable-dynamic-vram', '--reserve-vram', '1']
         with patch('server.requests.get') as get:
             get.return_value.json.return_value = {'system': {'argv': flags}}
             self.assertEqual(server.comfy_status(), (True, True))

@@ -19,3 +19,13 @@ Le calcul de l'image (4 étapes) n'est qu'une petite partie du temps : les journ
 (encodeur Qwen3-VL de 8 Go en partie déchargé, transformeur, VAE) sont rechargés vers la carte à chaque image.
 `--cache-none` et la mémoire de 8 Go empêchent de les garder. La prochaine piste de vitesse est donc le chargement
 (garder l'encodeur en mémoire, encodeur plus léger), pas le nombre d'étapes.
+
+## Après correctif du rechargement (même jour)
+ComfyUI sans `--cache-none` (cache RAM par défaut) : les modèles restent chargés entre deux images.
+Garder Qwen et FLUX ensemble dépasse 32 Go de RAM (plantage « access violation » constaté au chargement de T5) :
+Atelier appelle `/free` de ComfyUI quand la famille de modèle change.
+
+| Pipeline | 1re image (chargement) | 2e | Images suivantes |
+|---|---:|---:|---:|
+| FLUX Schnell, T5 sur GPU | 64 s | 36 s | **11-17 s** (contre 82 s avant) |
+| Qwen Lightning 4 étapes | 38-54 s | 20-41 s | **15-20 s** (contre 101 s avant, 28 étapes) |

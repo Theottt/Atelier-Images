@@ -51,7 +51,8 @@ def comfy_status():
         response = requests.get(COMFY + '/system_stats', timeout=2)
         response.raise_for_status()
         argv = response.json().get('system', {}).get('argv', [])
-        profile = all(flag in argv for flag in ('--disable-dynamic-vram', '--cache-none', '--reserve-vram'))
+        # 16 nov : plus de --cache-none (rechargement de tous les modeles a chaque image) ; cache RAM par defaut de ComfyUI.
+        profile = all(flag in argv for flag in ('--disable-dynamic-vram', '--reserve-vram')) and '--cache-none' not in argv
         profile = profile and not any(flag in argv for flag in ('--lowvram', '--novram', '--cpu', '--gpu-only', '--highvram'))
         if profile:
             profile = float(argv[argv.index('--reserve-vram') + 1]) >= 1
@@ -68,7 +69,7 @@ def start_comfy():
         with (HERE / 'comfyui.log').open('ab') as log:
             process = subprocess.Popen(
                 [sys.executable, '-s', str(ROOT / 'ComfyUI/main.py'), '--windows-standalone-build', '--disable-auto-launch',
-                 '--disable-dynamic-vram', '--reserve-vram', '1', '--cache-none'],
+                 '--disable-dynamic-vram', '--reserve-vram', '1'],
                 cwd=ROOT, stdout=log, stderr=log,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         for _ in range(180):
@@ -140,7 +141,7 @@ def make_prompt(text, shape, seed, model=None, reference=None, references=None):
     by_id[9]['widgets_values'] = ['Atelier_FLUX']
     graph = {
         '1': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': model['name']}},
-        '2': {'class_type': 'DualCLIPLoader', 'inputs': {'clip_name1': 'clip_l.safetensors', 'clip_name2': 't5xxl_fp16.safetensors', 'type': 'flux', 'device': 'cpu'}},
+        '2': {'class_type': 'DualCLIPLoader', 'inputs': {'clip_name1': 'clip_l.safetensors', 'clip_name2': 't5xxl_fp16.safetensors', 'type': 'flux', 'device': 'default'}},
         '3': {'class_type': 'CLIPTextEncode', 'inputs': {'text': text, 'clip': ['2', 0]}},
         '4': {'class_type': 'ConditioningZeroOut', 'inputs': {'conditioning': ['3', 0]}},
         '5': {'class_type': 'EmptySD3LatentImage', 'inputs': {'width': width, 'height': height, 'batch_size': 1}},
@@ -225,8 +226,21 @@ def validate_jobs(data):
     return specs
 
 
-QUEUE = JobQueue(HERE / 'queue_state.json',
-                 lambda job, seed: make_prompt(job['prompt'], job['format'], seed, model_info(job['model']), job.get('reference'), job.get('references')), COMFY)
+LAST_FAMILY = None
+
+
+def queued_payload(job, seed):
+    # Sans --cache-none, les modeles restent charges entre deux images (bien plus rapide). Mais garder Qwen ET FLUX
+    # en memoire depasse la RAM (plantage constate) : on vide la memoire de ComfyUI quand la famille de modele change.
+    global LAST_FAMILY
+    model = model_info(job['model'])
+    if LAST_FAMILY and model.get('family') != LAST_FAMILY:
+        requests.post(COMFY + '/free', json={'unload_models': True, 'free_memory': True}, timeout=30)
+    LAST_FAMILY = model.get('family')
+    return make_prompt(job['prompt'], job['format'], seed, model, job.get('reference'), job.get('references'))
+
+
+QUEUE = JobQueue(HERE / 'queue_state.json', queued_payload, COMFY)
 MONITOR = MemoryMonitor()
 
 
