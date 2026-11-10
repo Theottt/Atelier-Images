@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -20,6 +21,10 @@ from PIL import Image, ImageOps
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from models import DEFAULT_MODEL, list_models, model_info
 from qwen_workflow import make_qwen_prompt
+from sd_workflow import make_sd_prompt
+from job_queue import JobQueue
+from monitor import MemoryMonitor
+from privacy import delete_image, delete_all
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -30,6 +35,7 @@ FORMATS = {'square': (512, 512), 'portrait': (512, 768), 'landscape': (768, 512)
 LOCK = threading.RLock()
 STATE = HERE / 'active_job.json'
 START_ERROR = ''
+GALLERY_REVISION = 0
 
 
 def comfy_ready():
@@ -39,6 +45,20 @@ def comfy_ready():
         return False
 
 
+def comfy_status():
+    try:
+        response = requests.get(COMFY + '/system_stats', timeout=2)
+        response.raise_for_status()
+        argv = response.json().get('system', {}).get('argv', [])
+        profile = all(flag in argv for flag in ('--disable-dynamic-vram', '--cache-none', '--reserve-vram'))
+        profile = profile and not any(flag in argv for flag in ('--lowvram', '--novram', '--cpu', '--gpu-only', '--highvram'))
+        if profile:
+            profile = float(argv[argv.index('--reserve-vram') + 1]) >= 1
+        return True, profile
+    except (requests.RequestException, ValueError, IndexError):
+        return False, False
+
+
 def start_comfy():
     global START_ERROR
     if comfy_ready():
@@ -46,7 +66,8 @@ def start_comfy():
     try:
         with (HERE / 'comfyui.log').open('ab') as log:
             process = subprocess.Popen(
-                [sys.executable, '-s', str(ROOT / 'ComfyUI/main.py'), '--windows-standalone-build', '--disable-auto-launch'],
+                [sys.executable, '-s', str(ROOT / 'ComfyUI/main.py'), '--windows-standalone-build', '--disable-auto-launch',
+                 '--disable-dynamic-vram', '--reserve-vram', '1', '--cache-none'],
                 cwd=ROOT, stdout=log, stderr=log,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         for _ in range(180):
@@ -61,10 +82,15 @@ def start_comfy():
 
 
 def active_job():
+    jobs = QUEUE.snapshot()['jobs']
+    if jobs:
+        return next((j for j in jobs if j['state'] not in ('done', 'error', 'cancelled')), jobs[-1])
     return json.loads(STATE.read_text(encoding='utf-8')) if STATE.exists() else None
 
 
 def job_status(job):
+    if 'count' in job:
+        return job
     if job.get('state') in ('done', 'error'):
         return job
     response = requests.get(COMFY + '/history/' + job['id'], timeout=10)
@@ -96,6 +122,8 @@ def job_status(job):
 
 def make_prompt(text, shape, seed, model=None, reference=None):
     model = model or model_info(DEFAULT_MODEL)
+    if model.get('family') == 'sd15':
+        return make_sd_prompt(text, *FORMATS[shape], seed)
     if model.get('family') == 'qwen21':
         width, height = FORMATS[shape]
         return make_qwen_prompt(text, width, height, seed, reference)
@@ -139,7 +167,7 @@ def make_prompt(text, shape, seed, model=None, reference=None):
 
 
 def gallery():
-    files = sorted([*OUTPUT.glob('Atelier_FLUX*.png'), *OUTPUT.glob('Atelier_Qwen*.png'), *OUTPUT.glob('FLUX_Schnell_Test*.png')], key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted([*OUTPUT.glob('Atelier_FLUX*.png'), *OUTPUT.glob('Atelier_Qwen*.png'), *OUTPUT.glob('Atelier_SD*.png'), *OUTPUT.glob('FLUX_Schnell_Test*.png')], key=lambda p: p.stat().st_mtime, reverse=True)
     result = []
     for path in files[:150]:
         try:
@@ -148,7 +176,7 @@ def gallery():
                 result.append({'filename': path.name, 'width': image.width, 'height': image.height,
                                'prompt': graph.get('3', {}).get('inputs', {}).get('text', graph.get('3', {}).get('inputs', {}).get('prompt', '')),
                                'seed': graph.get('6', {}).get('inputs', {}).get('seed'),
-                               'model': graph.get('1', {}).get('inputs', {}).get('unet_name', ''),
+                               'model': graph.get('1', {}).get('inputs', {}).get('unet_name', graph.get('1', {}).get('inputs', {}).get('ckpt_name', '')),
                                'reference': graph.get('11', {}).get('inputs', {}).get('image'),
                                'created': path.stat().st_mtime})
         except (OSError, ValueError):
@@ -156,7 +184,49 @@ def gallery():
     return result
 
 
+def validate_jobs(data):
+    if not isinstance(data, dict):
+        raise ValueError('Paramètres invalides.')
+    prompts = data.get('prompts', [data.get('prompt', '')])
+    if not isinstance(prompts, list) or not 1 <= len(prompts) <= 50:
+        raise ValueError('Ajoute entre 1 et 50 prompts.')
+    shape, count, seed = data.get('format', 'square'), data.get('count', 1), data.get('seed')
+    if not isinstance(shape, str) or shape not in FORMATS:
+        raise ValueError('Format invalide.')
+    if type(count) is not int or not 1 <= count <= 50:
+        raise ValueError('Choisis entre 1 et 50 images par prompt.')
+    if seed is not None and (type(seed) is not int or not 0 <= seed <= 2**32 - 1):
+        raise ValueError('La seed doit être un entier entre 0 et 4294967295.')
+    model = model_info(data.get('model', DEFAULT_MODEL))
+    reference = data.get('reference')
+    if reference is not None:
+        if not model.get('can_edit'):
+            raise ValueError('Choisis Qwen pour retoucher une image.')
+        if not isinstance(reference, str) or not reference.startswith('atelier_ref_') or not reference.endswith('.png') or any(c in reference for c in '/\\:'):
+            raise ValueError('Image de référence invalide.')
+        if not (ROOT / 'ComfyUI/input' / reference).is_file():
+            raise ValueError('Image introuvable. Ajoute-la à nouveau.')
+    specs = []
+    for text in prompts:
+        if not isinstance(text, str) or not text.strip() or len(text) > 100000:
+            raise ValueError('Chaque prompt doit contenir entre 1 et 100 000 caractères.')
+        specs.append({'prompt': text.strip(), 'format': shape, 'seed': secrets.randbelow(2**32) if seed is None else seed,
+                      'model': model['name'], 'reference': reference, 'count': count})
+    if sum(len(s['prompt']) for s in specs) > 1000000:
+        raise ValueError('Un envoi peut contenir au maximum 1 000 000 de caractères.')
+    return specs
+
+
+QUEUE = JobQueue(HERE / 'queue_state.json',
+                 lambda job, seed: make_prompt(job['prompt'], job['format'], seed, model_info(job['model']), job.get('reference')), COMFY)
+MONITOR = MemoryMonitor()
+
+
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # Do not retain image paths or request URLs in access logs.
+        pass
+
     def reply(self, status, body, content_type='application/json; charset=utf-8'):
         data = json.dumps(body, ensure_ascii=False).encode() if content_type.startswith('application/json') else body
         self.send_response(status)
@@ -177,11 +247,16 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         try:
             if path == '/api/status':
-                ready = comfy_ready()
-                return self.reply(200, {'app': 'atelier-images', 'ready': ready, 'error': START_ERROR if not ready else '', 'job': active_job()})
+                ready, memory_profile = comfy_status()
+                return self.reply(200, {'app': 'atelier-images', 'ready': ready, 'memory_profile': memory_profile,
+                                        'error': START_ERROR if not ready else '', 'job': active_job(), 'gallery_revision': GALLERY_REVISION})
             if path == '/api/job':
                 job = active_job()
                 return self.reply(200, job_status(job) if job else {'state': 'idle'})
+            if path == '/api/queue':
+                return self.reply(200, QUEUE.snapshot())
+            if path == '/api/metrics':
+                return self.reply(200, MONITOR.snapshot())
             if path == '/api/gallery':
                 return self.reply(200, gallery())
             if path == '/api/models':
@@ -189,10 +264,10 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/images/'):
                 filename = path[len('/images/'):]
                 file = OUTPUT / filename
-                if file.resolve().parent != OUTPUT.resolve() or not filename.startswith(('Atelier_FLUX', 'Atelier_Qwen', 'FLUX_Schnell_Test')) or file.suffix != '.png':
+                if file.resolve().parent != OUTPUT.resolve() or not filename.startswith(('Atelier_FLUX', 'Atelier_Qwen', 'Atelier_SD', 'FLUX_Schnell_Test')) or file.suffix != '.png':
                     return self.reply(404, {'error': 'Image introuvable.'})
                 return self.reply(200, file.read_bytes(), 'image/png')
-            static = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
+            static = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/studio.css': ('studio.css', 'text/css; charset=utf-8')}
             if path in static:
                 filename, mime = static[path]
                 return self.reply(200, (HERE / 'dist' / filename).read_bytes(), mime)
@@ -203,52 +278,39 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {'error': 'Fichier introuvable.'})
 
     def do_POST(self):
+        with LOCK:
+            return self.handle_post()
+
+    def handle_post(self):
+        global GALLERY_REVISION
         if not self.allowed():
             return self.reply(403, {'error': 'Accès local uniquement.'})
         if self.path == '/api/reference':
             return self.upload_reference()
-        if self.path != '/api/generate':
+        if self.path not in ('/api/generate', '/api/queue', '/api/queue/control', '/api/images/delete', '/api/images/delete-all'):
             return self.reply(404, {'error': 'Route inconnue.'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 < size <= 32768:
+            if not 0 < size <= 8 * 1024 * 1024:
+                self.close_connection = True
                 return self.reply(400, {'error': 'Description trop longue ou vide.'})
             data = json.loads(self.rfile.read(size))
-            text = data.get('prompt', '')
-            shape = data.get('format', 'square')
-            seed = data.get('seed')
-            if not isinstance(text, str) or not text.strip() or len(text) > 6000 or shape not in FORMATS:
-                return self.reply(400, {'error': 'Ajoute une description (6 000 caractères maximum) et un format valide.'})
-            if seed is None:
-                seed = secrets.randbelow(2**32)
-            if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
-                return self.reply(400, {'error': 'La seed doit être un entier entre 0 et 4294967295.'})
-            try:
-                model = model_info(data.get('model', DEFAULT_MODEL))
-            except ValueError as error:
-                return self.reply(400, {'error': str(error)})
-            reference = data.get('reference')
-            if reference:
-                if not model.get('can_edit'):
-                    return self.reply(400, {'error': 'Choisis Qwen pour retoucher une image.'})
-                if not isinstance(reference, str) or not reference.startswith('atelier_ref_') or not reference.endswith('.png') or any(c in reference for c in '/\\:'):
-                    return self.reply(400, {'error': 'Image de référence invalide.'})
-                if not (ROOT / 'ComfyUI/input' / reference).is_file():
-                    return self.reply(400, {'error': 'Image introuvable. Ajoute-la à nouveau.'})
-            with LOCK:
-                old = active_job()
-                if old and job_status(old)['state'] in ('queued', 'running'):
-                    return self.reply(409, {'error': 'Une image est déjà en cours de création.'})
-                response = requests.post(COMFY + '/prompt', json=make_prompt(text.strip(), shape, seed, model, reference), timeout=30)
-                if not response.ok:
-                    return self.reply(502, {'error': 'ComfyUI a refusé le workflow : ' + response.text[:2000]})
-                job = {'id': response.json()['prompt_id'], 'prompt': text.strip(), 'format': shape, 'seed': seed, 'model': model['name'], 'reference': reference, 'started': time.time()}
-                temp = STATE.with_suffix('.tmp')
-                temp.write_text(json.dumps(job, ensure_ascii=False), encoding='utf-8')
-                temp.replace(STATE)
-            self.reply(200, job)
-        except (ValueError, TypeError, AttributeError):
-            self.reply(400, {'error': 'Paramètres invalides.'})
+            if self.path == '/api/images/delete-all':
+                if data.get('confirmation') != 'DELETE_ALL':
+                    raise ValueError('Confirmation de suppression manquante.')
+                result = delete_all(ROOT, QUEUE, COMFY)
+                GALLERY_REVISION += 1
+                return self.reply(200, result)
+            if self.path == '/api/images/delete':
+                result = delete_image(ROOT, QUEUE, COMFY, data.get('filename'))
+                GALLERY_REVISION += 1
+                return self.reply(200, result)
+            if self.path == '/api/queue/control':
+                return self.reply(200, QUEUE.control(data.get('action'), data.get('id')))
+            jobs = QUEUE.enqueue(validate_jobs(data))
+            return self.reply(202, jobs[0] if self.path == '/api/generate' else {'jobs': jobs})
+        except (ValueError, TypeError, AttributeError) as error:
+            self.reply(400, {'error': str(error) if isinstance(error, ValueError) else 'Paramètres invalides.'})
         except requests.RequestException:
             self.reply(503, {'error': 'ComfyUI ne répond pas. Vérifie son démarrage avant de réessayer.'})
         except OSError as error:
@@ -279,12 +341,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+class AtelierHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+    allow_reuse_port = False
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args()
     try:
-        server = ThreadingHTTPServer(('127.0.0.1', 8189), Handler)
+        server = AtelierHTTPServer(('127.0.0.1', 8189), Handler)
     except OSError:
         try:
             existing = requests.get(URL + '/api/status', timeout=3).json()
@@ -296,6 +368,9 @@ def main():
             pass
         raise RuntimeError('Le port 8189 est déjà utilisé par une autre application.')
     threading.Thread(target=start_comfy, daemon=True).start()
+    stop = threading.Event()
+    threading.Thread(target=QUEUE.run, args=(stop,), daemon=True).start()
+    threading.Thread(target=MONITOR.run, args=(stop,), daemon=True).start()
     print(f'Atelier Images : {URL}', flush=True)
     if not args.no_browser:
         webbrowser.open(URL)
@@ -304,6 +379,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        stop.set()
         server.server_close()
 
 

@@ -7,7 +7,9 @@ VAE = 'qwen_image_2.1_vae_bf16.safetensors'
 def make_qwen_prompt(text, width, height, seed, reference=None):
     graph = {
         '1': {'class_type': 'UnetLoaderGGUF', 'inputs': {'unet_name': MODEL}},
-        '2': {'class_type': 'CLIPLoader', 'inputs': {'clip_name': ENCODER, 'type': 'qwen_image', 'device': 'cpu'}},
+        # Let ComfyUI execute the encoder on CUDA with partial RAM offloading.
+        # Forcing CPU here dominated generation time on the 8 GB RTX 5060.
+        '2': {'class_type': 'CLIPLoader', 'inputs': {'clip_name': ENCODER, 'type': 'qwen_image', 'device': 'default'}},
         '3': {'class_type': 'TextEncodeQwenImage21', 'inputs': {'clip': ['2', 0], 'prompt': text, 'negative_prompt': '', 'resolution': 512}},
         '5': {'class_type': 'EmptyLatentImage', 'inputs': {'width': width, 'height': height, 'batch_size': 1}},
         '6': {'class_type': 'KSampler', 'inputs': {'model': ['10', 0], 'positive': ['3', 0], 'negative': ['3', 1], 'latent_image': ['5', 0], 'seed': seed, 'steps': 28, 'cfg': 1.0, 'sampler_name': 'euler', 'scheduler': 'simple', 'denoise': 1.0}},
@@ -23,7 +25,7 @@ def make_qwen_prompt(text, width, height, seed, reference=None):
         del graph['5']
     specs = {
         '1': ([30, 30], [], [('MODEL', 'MODEL')], [MODEL]),
-        '2': ([30, 200], [], [('CLIP', 'CLIP')], [ENCODER, 'qwen_image', 'cpu']),
+        '2': ([30, 200], [], [('CLIP', 'CLIP')], [ENCODER, 'qwen_image', 'default']),
         '3': ([430, 210], [('clip', 'CLIP')] + ([('vae', 'VAE'), ('images.image_1', 'IMAGE')] if reference else []), [('positive', 'CONDITIONING'), ('negative', 'CONDITIONING'), ('latent', 'LATENT')], [text, '', 512]),
         '5': ([440, 650], [], [('LATENT', 'LATENT')], [width, height, 1]),
         '6': ([900, 250], [('model', 'MODEL'), ('positive', 'CONDITIONING'), ('negative', 'CONDITIONING'), ('latent_image', 'LATENT')], [('LATENT', 'LATENT')], [seed, 'fixed', 28, 1.0, 'euler', 'simple', 1.0]),

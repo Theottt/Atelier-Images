@@ -16,6 +16,14 @@ from qwen_workflow import make_qwen_prompt, MODEL
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_memory_profile_rejects_forced_cpu_encoder(self):
+        flags = ['--disable-dynamic-vram', '--reserve-vram', '1', '--cache-none']
+        with patch('server.requests.get') as get:
+            get.return_value.json.return_value = {'system': {'argv': flags}}
+            self.assertEqual(server.comfy_status(), (True, True))
+            get.return_value.json.return_value = {'system': {'argv': flags + ['--lowvram']}}
+            self.assertEqual(server.comfy_status(), (True, False))
+
     def check_links(self, payload):
         workflow = payload['extra_data']['extra_pnginfo']['workflow']
         by_id = {n['id']: n for n in workflow['nodes']}
@@ -36,6 +44,10 @@ class WorkflowTests(unittest.TestCase):
         graph = payload['prompt']
         self.assertEqual(graph['1']['inputs']['unet_name'], MODEL)
         self.assertEqual(graph['2']['inputs']['type'], 'qwen_image')
+        self.assertEqual(graph['2']['inputs']['device'], 'default')
+        clip_node = next(n for n in payload['extra_data']['extra_pnginfo']['workflow']['nodes'] if n['id'] == 2)
+        self.assertEqual(clip_node['widgets_values'][-1], 'default')
+        self.assertEqual(graph['6']['inputs']['steps'], 28)
         self.assertEqual(graph['6']['inputs']['latent_image'], ['5', 0])
         self.assertEqual(graph['5']['inputs']['width'], 768)
 

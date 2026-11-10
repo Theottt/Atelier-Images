@@ -4,6 +4,7 @@ from pathlib import Path
 
 import gguf
 from qwen_workflow import MODEL as QWEN_MODEL, ENCODER as QWEN_ENCODER, VAE as QWEN_VAE
+from sd_workflow import MODEL as SD_MODEL
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / 'ComfyUI/models/unet'
 DEFAULT_MODEL = 'flux1-schnell-Q4_K_S.gguf'
@@ -55,6 +56,12 @@ def cached_inspection(path, size, mtime):
 
 
 def model_info(name):
+    if name == SD_MODEL:
+        checkpoint = MODEL_DIR.parent / 'checkpoints' / SD_MODEL
+        if not checkpoint.is_file():
+            raise ValueError('Stable Diffusion non installé : lance setup_sd_local.py.')
+        return {'name': name, 'label': 'Stable Diffusion 1.5 · léger · 8 Go', 'size': checkpoint.stat().st_size,
+                'family': 'sd15', 'variant': 'sd15', 'steps': 20, 'can_edit': False}
     path = model_path(name)
     if not path.is_file():
         raise ValueError('Ce modèle est introuvable. Actualise la liste des modèles installés.')
@@ -75,4 +82,6 @@ def list_models():
             found.append(model_info(path.name))
         except (ValueError, OSError) as error:
             excluded.append({'name': path.name, 'reason': str(error)})
+    if (MODEL_DIR.parent / 'checkpoints' / SD_MODEL).is_file():
+        found.append(model_info(SD_MODEL))
     return {'models': found, 'excluded': excluded, 'default': DEFAULT_MODEL}

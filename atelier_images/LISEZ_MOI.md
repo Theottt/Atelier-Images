@@ -46,11 +46,78 @@ nouveau démarrage du serveur ; `launcher.log` et `comfyui.log` sont alimentés 
 
 1. Écris une description, en français ou en anglais.
 2. Choisis Carré, Portrait ou Paysage.
-3. Clique sur **Créer mon image**. Le premier chargement peut prendre quelques minutes.
+3. Choisis le nombre d'images par prompt, puis clique sur **Ajouter à la file**. Le premier chargement peut prendre quelques minutes.
 
 Clique sur une image de la galerie pour l'agrandir, la télécharger ou reprendre sa description et sa seed.
 Une seed vide produit une nouvelle variation. Avec la même seed, la même description et le même format, tu peux reproduire une composition.
-Avec FLUX, chaque description crée une nouvelle image. Avec Qwen, tu peux aussi ajouter une image à retoucher.
+Avec FLUX ou Stable Diffusion, chaque description crée de nouvelles images. Avec Qwen, tu peux aussi ajouter une image à retoucher.
+
+## Stable Diffusion et profil 8 Go
+
+Choisis **Stable Diffusion 1.5 · léger · 8 Go** dans **Mon modèle**. Il utilise 20 étapes,
+une seule image à la fois et un décodage par tuiles pour réduire la mémoire nécessaire.
+Le modèle est dans `ComfyUI/models/checkpoints/v1-5-pruned-emaonly.safetensors`.
+Sur une nouvelle installation, télécharge-le avec :
+
+```powershell
+.\python_embeded\python.exe -s setup_sd_local.py
+```
+
+Le lanceur active le mode mémoire réduite, réserve 1 Go pour Windows et désactive le cache
+des résultats intermédiaires de ComfyUI. Une mention sous les jauges indique si ce profil est actif.
+Si tu avais lancé ComfyUI séparément, termine ses générations, ferme son processus, puis relance Atelier.
+Les formats restent limités à 512 × 512, 512 × 768 ou 768 × 512.
+
+Les jauges VRAM et RAM montrent l'utilisation globale de la machine toutes les deux secondes,
+y compris celle des autres applications. Elles passent en couleur d'alerte à forte occupation.
+Ce profil vise une carte de 8 Go ; il ne limite pas la mémoire consommée par d'autres logiciels.
+
+## File de prompts et séries d'images
+
+- **Images par prompt** : de 1 à 50, calculées une par une.
+- **Plusieurs prompts : un par ligne** : chaque ligne devient un prompt distinct avec le nombre choisi.
+- Tu peux ajouter des prompts pendant une génération et changer de modèle pour les suivants.
+- **Mettre en pause** laisse finir l'image en cours, puis attend **Reprendre**.
+- **Annuler** supprime les images restantes du prompt ; une image déjà en calcul se termine.
+- Les tâches réussies et annulées disparaissent automatiquement de la liste, sans supprimer les PNG.
+- Les erreurs restent visibles ; **Retirer** permet de fermer une entrée en erreur.
+
+Exemple : trois lignes et quatre images par prompt donnent douze images dans la file.
+La limite est de 200 images restantes. Chaque image utilise la seed initiale + son numéro dans la série.
+Les paramètres et la référence de retouche sont figés au moment de l'ajout.
+
+La file reste active si tu fermes l'onglet. Elle est enregistrée dans `atelier_images/queue_state.json`
+(prompts inclus, fichier exclu de Git). Au redémarrage d'Atelier, les travaux sont retrouvés si ComfyUI
+dispose encore de leur historique. Un résultat incertain n'est jamais renvoyé automatiquement :
+une erreur invite à vérifier la galerie pour éviter les doublons. Une erreur mémoire met la file en pause.
+
+## Prompts longs
+
+Le champ n'est plus limité à 6 000 caractères au total. Il accepte jusqu'à **100 000 caractères
+par prompt** et **1 000 000 de caractères par envoi**. En mode multi-prompts, chaque ligne est
+un prompt distinct. Un compteur indique la longueur totale et celle de la ligne la plus longue.
+Les dépassements sont signalés, jamais tronqués silencieusement par Atelier. La capacité de
+compréhension du modèle reste distincte de cette limite de saisie.
+
+## Supprimer une image
+
+Le bouton **Supprimer** sous chaque image demande une confirmation, puis efface le PNG sans passer
+par la corbeille, y compris son prompt et son workflow intégrés. Le nettoyage cible aussi les
+références dans la file, les anciens états d'Atelier, l'historique du moteur ComfyUI local,
+le catalogue SQLite et les mentions correspondantes dans les journaux du projet.
+
+Les autres images sont conservées, même si elles partagent exactement le même prompt.
+Le prompt partagé reste donc dans leurs PNG et dans leurs propres enregistrements.
+Une série encore active doit se terminer ou être annulée avant de supprimer une de ses images.
+ComfyUI doit être joignable pour nettoyer son historique. Les échecs de nettoyage sont affichés :
+une image effacée ne signifie pas forcément que toutes les étapes annexes ont réussi.
+
+Cette fonction couvre les emplacements gérés par Atelier. Elle ne peut pas supprimer des copies
+téléchargées ailleurs, des images de référence importées séparément, captures d'écran, profils de
+navigateur, sauvegardes, fichiers synchronisés ou éléments déjà partagés avec un service externe.
+Elle ne constitue pas un effacement physique garanti du SSD. Aucun historique distant de
+génération n'est utilisé par notre pipeline local. Un historique ComfyUI partagé avec d'autres
+sorties ou une prévisualisation liée non prise en charge est conservé et signalé comme nettoyage incomplet.
 
 Les PNG restent dans `ComfyUI/output` et contiennent le workflow ComfyUI. La galerie affiche les 150 dernières images de cet atelier et du test initial.
 ## Changer de modèle
@@ -69,7 +136,7 @@ Clique sur **Retirer** pour revenir à la création à partir du texte seul.
 
 La retouche accepte une référence à la fois (20 Mo et 25 mégapixels maximum). Une copie normalisée est conservée dans `ComfyUI/input` ; le fichier original est préservé.
 Elle conserve les proportions de la référence, avec une surface proche de 512 × 512 pixels. Le sélecteur de format sert à la génération sans référence.
-Qwen utilise 28 étapes et son encodeur Qwen3-VL sur CPU. Il peut prendre sensiblement plus de temps que FLUX Schnell, surtout au premier chargement.
+Qwen utilise 28 étapes. Son encodeur Qwen3-VL s’exécute sur GPU avec déchargement partiel en RAM : il ne tient pas entièrement dans 8 Go de VRAM. Le cache Qwen reste sur CPU. Le premier chargement et la taille de l’image influencent le temps de génération.
 
 Source choisie : https://huggingface.co/spaces/fishpasters/uncensored-imageTOimage2Ref
 Poids locaux quantifiés : https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF
@@ -82,3 +149,10 @@ Le nom du modèle et le workflow sont enregistrés dans chaque PNG. **Reprendre 
 
 Tout fonctionne localement. Aucun compte, service distant ou téléchargement de modèle supplémentaire.
 En cas d'erreur de démarrage, consulte `atelier_images/comfyui.log`. Fermer l'atelier ne ferme pas ComfyUI s'il tourne en arrière-plan.
+
+
+### Tout supprimer
+
+Dans ? Mes cr?ations ?, le bouton ? Tout supprimer ? demande une confirmation avant de supprimer sans corbeille tous les fichiers des dossiers ComfyUI/output, input, temp, previews et user/default/workflows, y compris ceux cr??s directement dans ComfyUI. Il vide les prompts de la file, la met en pause et nettoie l?historique ComfyUI, le catalogue des images et les journaux locaux. Mets la file en pause et attends la fin de la g?n?ration en cours avant de l?utiliser. ComfyUI doit ?tre disponible.
+
+Le code, les mod?les et les workflows techniques de l?application sont conserv?s. Les journaux techniques peuvent se recr?er. Les fichiers t?l?charg?s ailleurs, sauvegardes, captures, autres onglets et caches du navigateur sont exclus. Ce nettoyage ne garantit pas un effacement physique du SSD. Tout ?chec partiel est signal? ; tu peux r?essayer.

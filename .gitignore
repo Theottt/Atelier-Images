@@ -47,6 +47,8 @@ __pycache__/
 *.mp4
 active_job.json
 active_job.tmp
+queue_state.json
+queue_state.tmp
 /flux_test_job.json
 /test_flux_image.py
 /atelier_images/qwen_verified.json
