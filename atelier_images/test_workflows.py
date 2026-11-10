@@ -103,3 +103,46 @@ class ReferenceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LightningAndSheetsTests(unittest.TestCase):
+    def check_links(self, payload):
+        WorkflowTests.check_links(self, payload)
+
+    def test_qwen_fast_uses_lora_and_published_sigmas(self):
+        from qwen_workflow import LIGHTNING_LORA, LIGHTNING_SIGMAS
+        payload = make_qwen_prompt('Un lac', 512, 512, 7, fast=True)
+        self.check_links(payload)
+        graph = payload['prompt']
+        self.assertEqual(graph['12']['inputs']['lora_name'], LIGHTNING_LORA)
+        self.assertEqual(graph['10']['inputs']['model'], ['12', 0])
+        self.assertEqual(graph['6']['class_type'], 'SamplerCustom')
+        self.assertEqual(graph['6']['inputs']['noise_seed'], 7)
+        self.assertEqual(graph['14']['inputs']['sigmas'], LIGHTNING_SIGMAS)
+        self.assertTrue(graph['9']['inputs']['filename_prefix'].startswith('Atelier_Qwen'))
+
+    def test_character_references_keep_chosen_format(self):
+        payload = make_qwen_prompt('Scene', 768, 512, 7, fast=True, references=['atelier_ref_char_A.png', 'atelier_ref_char_B.png'])
+        self.check_links(payload)
+        graph = payload['prompt']
+        self.assertEqual(graph['3']['inputs']['images.image_1'], ['20', 0])
+        self.assertEqual(graph['3']['inputs']['images.image_2'], ['21', 0])
+        self.assertEqual(graph['6']['inputs']['latent_image'], ['5', 0])
+        self.assertEqual(graph['5']['inputs']['width'], 768)
+
+    def test_sheet_expansion(self):
+        import json
+        import characters
+        with tempfile.TemporaryDirectory() as folder:
+            sheets = Path(folder) / 'characters.json'
+            Image.new('RGB', (8, 8)).save(Path(folder) / 'Blob.png')
+            sheets.write_text(json.dumps({'Blob': {'label': 'Bean Blob', 'description': 'pink blob', 'reference': 'Blob.png'},
+                                          'Pup': {'description': 'blue pup'}}), encoding='utf-8')
+            text, refs, unknown = characters.expand('@Blob plays with @Pup and @Blob and @Nope', sheets)
+            self.assertIn('Bean Blob (exactly the character of reference image 1: pink blob)', text)
+            self.assertIn('Pup (blue pup)', text)
+            self.assertEqual(text.count('pink blob'), 1)
+            self.assertEqual([r.name for r in refs], ['Blob.png'])
+            self.assertEqual(unknown, ['Nope'])
+            staged = characters.stage(refs, Path(folder) / 'input')
+            self.assertEqual(staged, ['atelier_ref_char_Blob.png'])

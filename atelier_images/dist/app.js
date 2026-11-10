@@ -27,7 +27,7 @@ function modelError(message) { $('model-error').textContent = message; $('model-
 function rememberModel(name) { try { localStorage.setItem('atelier-model', name); } catch {} }
 function describeModel() {
   const model = models.find(item => item.name === $('model').value);
-  const profile = model?.family === 'sd15' ? 'Stable Diffusion 1.5 · 20 étapes · profil mémoire réduit' : model?.family === 'qwen21' ? 'Qwen · génération et retouche · 28 étapes' : model?.variant === 'dev' ? 'Profil Dev · 20 étapes' : 'Profil Schnell · 4 étapes · rapide';
+  const profile = model?.family === 'sd15' ? 'Stable Diffusion 1.5 · 20 étapes · profil mémoire réduit' : model?.fast ? 'Qwen Lightning · 4 étapes · fiches avec image de référence' : model?.family === 'qwen21' ? 'Qwen · génération et retouche · 28 étapes' : model?.variant === 'dev' ? 'Profil Dev · 20 étapes' : 'Profil Schnell · 4 étapes · rapide';
   $('model-info').textContent = model ? `${profile} · ${(model.size / 1024**3).toFixed(2)} Go` : 'Aucun modèle configuré pour le moment.';
   $('reference-panel').hidden = !model?.can_edit;
   if (model) rememberModel(model.name);
@@ -287,3 +287,38 @@ function confirmPurge() {
     dialog.showModal();
   });
 }
+
+// Fiches @Nom (personnages coherents d une image a l autre).
+let sheets = [];
+async function refreshCharacters() {
+  const data = await api('/api/characters');
+  sheets = data.characters;
+  $('characters-panel').hidden = !sheets.length;
+  $('character-list').replaceChildren();
+  $('sheet-name').replaceChildren();
+  for (const sheet of sheets) {
+    const chip = document.createElement('button');
+    chip.type = 'button'; chip.className = 'character-chip';
+    chip.textContent = (sheet.reference ? '📷 ' : '') + '@' + sheet.name;
+    chip.title = sheet.description;
+    chip.addEventListener('click', () => {
+      const area = $('prompt'), at = area.selectionStart ?? area.value.length;
+      const token = '@' + sheet.name + ' ';
+      area.value = area.value.slice(0, at) + token + area.value.slice(area.selectionEnd ?? at);
+      area.focus(); area.selectionStart = area.selectionEnd = at + token.length; updatePromptLength();
+    });
+    $('character-list').append(chip);
+    const option = document.createElement('option'); option.value = sheet.name; option.textContent = '@' + sheet.name; $('sheet-name').append(option);
+  }
+  $('use-as-sheet').disabled = !sheets.length;
+}
+$('use-as-sheet').addEventListener('click', async () => {
+  if (!selected || !$('sheet-name').value) return;
+  try {
+    await api('/api/characters/reference', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: $('sheet-name').value, filename: selected.filename})});
+    await refreshCharacters();
+    $('detail-meta').textContent += ' · Image de @' + $('sheet-name').value + ' enregistrée';
+  } catch (err) { error(err.message); }
+});
+refreshCharacters().catch(() => {});

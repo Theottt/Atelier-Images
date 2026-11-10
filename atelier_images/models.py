@@ -3,11 +3,13 @@ from functools import lru_cache
 from pathlib import Path
 
 import gguf
-from qwen_workflow import MODEL as QWEN_MODEL, ENCODER as QWEN_ENCODER, VAE as QWEN_VAE
+from qwen_workflow import MODEL as QWEN_MODEL, ENCODER as QWEN_ENCODER, VAE as QWEN_VAE, LIGHTNING_LORA
 from sd_workflow import MODEL as SD_MODEL
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / 'ComfyUI/models/unet'
 DEFAULT_MODEL = 'flux1-schnell-Q4_K_S.gguf'
+# Virtual entry: the installed Qwen 2.1 weights + the Lightning 4-step LoRA.
+QWEN_FAST = 'qwen21-lightning'
 
 
 def model_path(name):
@@ -56,6 +58,12 @@ def cached_inspection(path, size, mtime):
 
 
 def model_info(name):
+    if name == QWEN_FAST:
+        lora = MODEL_DIR.parent / 'loras' / LIGHTNING_LORA
+        if not lora.is_file():
+            raise ValueError('Qwen Lightning non installé : LoRA manquant ' + LIGHTNING_LORA)
+        info = model_info(QWEN_MODEL)
+        return {**info, 'name': QWEN_FAST, 'label': 'Qwen 2.1 Lightning · 4 étapes · rapide et fidèle', 'variant': 'qwen21_fast', 'steps': 4, 'fast': True}
     if name == SD_MODEL:
         checkpoint = MODEL_DIR.parent / 'checkpoints' / SD_MODEL
         if not checkpoint.is_file():
@@ -84,4 +92,9 @@ def list_models():
             excluded.append({'name': path.name, 'reason': str(error)})
     if (MODEL_DIR.parent / 'checkpoints' / SD_MODEL).is_file():
         found.append(model_info(SD_MODEL))
-    return {'models': found, 'excluded': excluded, 'default': DEFAULT_MODEL}
+    try:
+        found.insert(0, model_info(QWEN_FAST))
+    except (ValueError, OSError) as error:
+        excluded.append({'name': QWEN_FAST, 'reason': str(error)})
+    default = QWEN_FAST if any(m['name'] == QWEN_FAST for m in found) else DEFAULT_MODEL
+    return {'models': found, 'excluded': excluded, 'default': default}

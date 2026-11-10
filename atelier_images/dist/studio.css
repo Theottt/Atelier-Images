@@ -12,3 +12,8 @@
 .purge-actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-top:24px}
 #purge-confirm button[value="delete"]{background:#a12d2d;color:white}
 #purge-status{white-space:pre-wrap;overflow-wrap:anywhere}
+
+.character-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.character-chip { border: 1px solid currentColor; border-radius: 999px; padding: 4px 12px; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.character-chip:hover { opacity: .75; }
+.sheet-tools { display: inline-flex; gap: 6px; align-items: center; }

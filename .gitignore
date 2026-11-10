@@ -88,3 +88,7 @@ node_modules/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Personal character sheets and benchmark outputs.
+/atelier_images/characters/
+/atelier_images/bench_results/

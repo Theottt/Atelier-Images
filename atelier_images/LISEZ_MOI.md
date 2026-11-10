@@ -127,6 +127,19 @@ L'import de modèles dans l'interface a été retiré. Pour ajouter un modèle, 
 
 FLUX Schnell conserve ses 4 étapes et ses encodeurs CLIP-L/T5. Le profil Dev utilise 20 étapes et une guidance de 3,5.
 
+## Qwen Lightning (4 étapes) et fiches @Nom
+
+**Qwen 2.1 Lightning · 4 étapes** (premier choix de **Mon modèle**) = les poids Qwen 2.1 déjà installés + le LoRA
+LightX2V Lightning v2-RL (`ComfyUI/models/loras/qwen21_lightning_v2_rl_4steps_rank64.safetensors`, SHA-256
+`02363ec9…3b09c6d`), avec le calendrier de 4 sigmas publié par ses auteurs. Il garde la compréhension fine de Qwen
+pour une fraction du temps. Les mesures avant / après sont dans `BENCHMARK_LIGHTNING.md` (`bench.py` les refait).
+
+**Fiches** : `atelier_images/characters/characters.json` (exemple : `characters.example.json`, dossier ignoré par Git).
+Écris `@Nom` dans une idée : la description exacte de la fiche est insérée à chaque fois. Si la fiche a une image
+(📷), Qwen la reçoit comme référence et garde le même personnage (jusqu'à 4 fiches avec image par prompt).
+Dans une image de la galerie, **Image de la fiche** l'enregistre comme référence de la fiche choisie.
+Avec FLUX ou Stable Diffusion, seule la description est insérée.
+
 ## Qwen Image 2.1 : génération et retouche
 
 Sélectionne **Qwen Image 2.1 Uncensored · génération et retouche** dans **Mon modèle**.

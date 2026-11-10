@@ -25,6 +25,7 @@ from sd_workflow import make_sd_prompt
 from job_queue import JobQueue
 from monitor import MemoryMonitor
 from privacy import delete_image, delete_all
+import characters
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -120,13 +121,13 @@ def job_status(job):
     return {**job, 'state': 'error', 'error': 'Cette génération a été interrompue ou retirée de la file. Tu peux la relancer.'}
 
 
-def make_prompt(text, shape, seed, model=None, reference=None):
+def make_prompt(text, shape, seed, model=None, reference=None, references=None):
     model = model or model_info(DEFAULT_MODEL)
     if model.get('family') == 'sd15':
         return make_sd_prompt(text, *FORMATS[shape], seed)
     if model.get('family') == 'qwen21':
         width, height = FORMATS[shape]
-        return make_qwen_prompt(text, width, height, seed, reference)
+        return make_qwen_prompt(text, width, height, seed, reference, fast=model.get('fast', False), references=references)
     workflow = json.loads((HERE / 'workflows/FLUX_Schnell_Test.json').read_text(encoding='utf-8'))
     workflow = copy.deepcopy(workflow)
     width, height = FORMATS[shape]
@@ -175,8 +176,8 @@ def gallery():
                 graph = json.loads(image.info.get('prompt', '{}'))
                 result.append({'filename': path.name, 'width': image.width, 'height': image.height,
                                'prompt': graph.get('3', {}).get('inputs', {}).get('text', graph.get('3', {}).get('inputs', {}).get('prompt', '')),
-                               'seed': graph.get('6', {}).get('inputs', {}).get('seed'),
-                               'model': graph.get('1', {}).get('inputs', {}).get('unet_name', graph.get('1', {}).get('inputs', {}).get('ckpt_name', '')),
+                               'seed': graph.get('6', {}).get('inputs', {}).get('seed', graph.get('6', {}).get('inputs', {}).get('noise_seed')),
+                               'model': graph.get('1', {}).get('inputs', {}).get('unet_name', graph.get('1', {}).get('inputs', {}).get('ckpt_name', '')) + (' · Lightning' if '12' in graph else ''),
                                'reference': graph.get('11', {}).get('inputs', {}).get('image'),
                                'created': path.stat().st_mtime})
         except (OSError, ValueError):
@@ -210,15 +211,22 @@ def validate_jobs(data):
     for text in prompts:
         if not isinstance(text, str) or not text.strip() or len(text) > 100000:
             raise ValueError('Chaque prompt doit contenir entre 1 et 100 000 caractères.')
-        specs.append({'prompt': text.strip(), 'format': shape, 'seed': secrets.randbelow(2**32) if seed is None else seed,
-                      'model': model['name'], 'reference': reference, 'count': count})
+        # Fiches @Nom : meme description a chaque fois, et image de reference pour Qwen.
+        expanded, files, unknown = characters.expand(text.strip())
+        if unknown:
+            raise ValueError('Fiche inconnue : @' + ', @'.join(sorted(set(unknown))) + '. Vérifie l’orthographe dans la liste des fiches.')
+        references = characters.stage(files, ROOT / 'ComfyUI/input') if model.get('can_edit') and files else []
+        if reference and references:
+            raise ValueError('Retire l’image à retoucher pour utiliser les images des fiches.')
+        specs.append({'prompt': expanded, 'format': shape, 'seed': secrets.randbelow(2**32) if seed is None else seed,
+                      'model': model['name'], 'reference': reference, 'references': references, 'count': count})
     if sum(len(s['prompt']) for s in specs) > 1000000:
         raise ValueError('Un envoi peut contenir au maximum 1 000 000 de caractères.')
     return specs
 
 
 QUEUE = JobQueue(HERE / 'queue_state.json',
-                 lambda job, seed: make_prompt(job['prompt'], job['format'], seed, model_info(job['model']), job.get('reference')), COMFY)
+                 lambda job, seed: make_prompt(job['prompt'], job['format'], seed, model_info(job['model']), job.get('reference'), job.get('references')), COMFY)
 MONITOR = MemoryMonitor()
 
 
@@ -261,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, gallery())
             if path == '/api/models':
                 return self.reply(200, list_models())
+            if path == '/api/characters':
+                return self.reply(200, {'characters': characters.listing()})
             if path.startswith('/images/'):
                 filename = path[len('/images/'):]
                 file = OUTPUT / filename
@@ -287,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {'error': 'Accès local uniquement.'})
         if self.path == '/api/reference':
             return self.upload_reference()
-        if self.path not in ('/api/generate', '/api/queue', '/api/queue/control', '/api/images/delete', '/api/images/delete-all'):
+        if self.path not in ('/api/generate', '/api/queue', '/api/queue/control', '/api/images/delete', '/api/images/delete-all', '/api/characters/reference'):
             return self.reply(404, {'error': 'Route inconnue.'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
@@ -305,6 +315,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = delete_image(ROOT, QUEUE, COMFY, data.get('filename'))
                 GALLERY_REVISION += 1
                 return self.reply(200, result)
+            if self.path == '/api/characters/reference':
+                filename = data.get('filename')
+                file = OUTPUT / str(filename)
+                if not isinstance(filename, str) or file.resolve().parent != OUTPUT.resolve() or file.suffix != '.png' or not file.is_file()                         or not filename.startswith(('Atelier_FLUX', 'Atelier_Qwen', 'Atelier_SD')):
+                    raise ValueError('Image introuvable.')
+                characters.save_reference(data.get('name'), file)
+                return self.reply(200, {'characters': characters.listing()})
             if self.path == '/api/queue/control':
                 return self.reply(200, QUEUE.control(data.get('action'), data.get('id')))
             jobs = QUEUE.enqueue(validate_jobs(data))
